@@ -189,6 +189,13 @@ export default function InventoryModals(props: ModalsProps) {
               e.preventDefault();
               onSubmitDelete();
             }}
+            onKeyDown={e => {
+             if (e.key === 'Enter') {
+               e.preventDefault();
+               onSubmitDelete();
+             }
+           }}
+
           >
             <p className="p-4">
               Are you sure you want to delete “{selectedItem?.name}”?
@@ -197,7 +204,7 @@ export default function InventoryModals(props: ModalsProps) {
               <Button type="button" className='border' variant="ghost" onClick={onCloseDelete}>
                 Cancel
               </Button>
-              <Button type="submit" variant="destructive">
+              <Button type="submit" variant="destructive" autoFocus={true}>
                 Delete
               </Button>
             </DialogFooter>

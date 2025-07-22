@@ -1,29 +1,43 @@
+// InventoryHeader.tsx
 'use client';
 
-import React, { useRef, DragEvent } from 'react';
+import React, { useState, DragEvent } from 'react';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface HeaderProps {
   onNew: () => void;
-  onUpload: (files: FileList) => void;
+  onUpload: (files: FileList) => Promise<void> | void;
 }
 
 export default function InventoryHeader({ onNew, onUpload }: HeaderProps) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pendingFiles, setPendingFiles] = useState<FileList | null>(null);
+  const [loading, setLoading] = useState(false);
 
+  // called for both drop and file‑picker
   const handleFiles = (files: FileList | null) => {
     if (files && files.length > 0) {
-      onUpload(files);
-      // reset so same file can be re‑selected if needed
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      setPendingFiles(files);
     }
   };
 
-  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+  // drop target
+  const handleDrop = (e: DragEvent<HTMLLabelElement>) => {
     e.preventDefault();
     handleFiles(e.dataTransfer.files);
+  };
+
+  // submit button
+  const handleSubmit = async () => {
+    if (!pendingFiles) return;
+    setLoading(true);
+    try {
+      await onUpload(pendingFiles);
+      setPendingFiles(null);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -34,26 +48,42 @@ export default function InventoryHeader({ onNew, onUpload }: HeaderProps) {
         </Button>
       </Link>
 
-      <div className="flex space-x-4">
-        <div
-          onClick={() => fileInputRef.current?.click()}
-          onDragOver={e => e.preventDefault()}
-          onDrop={handleDrop}
-          className="
-            relative flex items-center justify-center
-            px-8 py-2 border-2 border-dashed border-gray-300
-            rounded-md cursor-pointer text-sm text-gray-600
-            hover:bg-gray-50 hover:cursor-pointer
-          "
-        >
-          Upload File
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-            onChange={e => handleFiles(e.target.files)}
-          />
-        </div>
+      <div className="flex space-x-4 items-center">
+        {/* hidden file input */}
+        <input
+          id="bulk-upload"
+          type="file"
+          accept=".csv"
+          className="hidden"
+          onChange={e => handleFiles(e.target.files)}
+        />
+
+        {!pendingFiles ? (
+          // label acts as both click‑to‑open and drop‑zone
+          <label
+            htmlFor="bulk-upload"
+            onDragOver={e => e.preventDefault()}
+            onDrop={handleDrop}
+            className="
+              flex items-center justify-center
+              px-8 py-2 border-2 border-dashed border-gray-300
+              rounded-md cursor-pointer text-sm text-gray-600
+              hover:bg-gray-50
+            "
+          >
+            Upload File
+          </label>
+        ) : (
+          // once a file is selected
+          <Button
+            onClick={handleSubmit}
+            disabled={loading}
+            className="bg-blue-600 text-white hover:bg-blue-500"
+          >
+            {loading ? 'Loading…' : 'Submit Upload'}
+          </Button>
+        )}
+
         <Button onClick={onNew}>+ New Item</Button>
       </div>
     </div>

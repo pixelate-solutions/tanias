@@ -33,8 +33,7 @@ import {
 
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { type DateRange } from 'react-day-picker';
-import { format } from 'date-fns';
+import { endOfDay, format } from 'date-fns';
 
 import {
   Dialog,
@@ -56,10 +55,11 @@ export default function InventoryPage() {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
 
-  // date range filter
-  const [dateRange, setDateRange] = useState<DateRange>({ from: undefined, to: undefined });
+  // separate start/end date filters
+  const [startDate, setStartDate] = useState<Date | undefined>(undefined);
+  const [endDate, setEndDate] = useState<Date | undefined>(undefined);
 
-  // modals & forms
+  // modals & forms for create/update/delete/note
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'update'>('create');
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
@@ -93,6 +93,10 @@ export default function InventoryPage() {
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);
   const [noteMode, setNoteMode] = useState<'add' | 'edit'>('add');
   const [noteText, setNoteText] = useState('');
+
+  // new: change-name dialog
+  const [changeNameDialogOpen, setChangeNameDialogOpen] = useState(false);
+  const [changeNameText, setChangeNameText] = useState('');
 
   // --- load all inventory rows ---
   async function loadInventory() {
@@ -142,27 +146,26 @@ export default function InventoryPage() {
   }
 
   // --- adjust quantity (copy + insert new row) ---
- async function handleUpdateQuantity() {
-  setUpdateError('');
-  const d = parseFloat(delta);
-  if (isNaN(d)) {                    
-    setUpdateError('Enter a valid number');
-    return;
+  async function handleUpdateQuantity() {
+    setUpdateError('');
+    const d = parseFloat(delta);
+    if (isNaN(d)) {
+      setUpdateError('Enter a valid number');
+      return;
+    }
+    if (!selectedItem) return;
+
+    await fetch(`/api/inventory/${selectedItem.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delta: d }),
+    });
+
+    setDelta('');
+    setModalOpen(false);
+    setSelectedItem(null);
+    await loadInventory();
   }
-  if (!selectedItem) return;
-
-  // send the actual (possibly negative) number
-  await fetch(`/api/inventory/${selectedItem.id}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ delta: d }),
-  });
-
-  setDelta('');
-  setModalOpen(false);
-  setSelectedItem(null);
-  await loadInventory();
-}
 
   // --- adjust cost (copy + insert new row) ---
   async function handleUpdateCost() {
@@ -215,7 +218,29 @@ export default function InventoryPage() {
     await loadInventory();
   }
 
-  // --- unified field updater for newItem & delta & cost ---
+  // --- change name (creates a new zero‑qty entry) ---
+  async function handleChangeNameSubmit() {
+    if (!selectedItem) return;
+
+    await fetch('/api/inventory', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        itemId: selectedItem.itemId,
+        type: selectedItem.type,
+        name: changeNameText,
+        cost: parseFloat(selectedItem.cost),
+        location: selectedItem.location,
+        quantity: 0,
+      }),
+    });
+
+    setChangeNameDialogOpen(false);
+    setSelectedItem(null);
+    await loadInventory();
+  }
+
+  // --- unified field updater for newItem & delta ---
   function handleChangeNew(key: string, value: string) {
     if (key === 'delta') {
       setDelta(value);
@@ -224,18 +249,72 @@ export default function InventoryPage() {
     }
   }
 
-  async function handleUpload(files: FileList) {
-    console.log('Uploading files:', files);
+  async function handleUpload(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    const text = await file.text();
+
+    // Split into non‑empty lines
+    const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
+    if (lines.length < 2) return; // no header + at least one row
+
+    // Remove BOM if present
+    let headerLine = lines.shift()!.replace(/^\uFEFF/, '');
+    const cols = headerLine
+      .split(/\t|,/)
+      .map(c => c.trim().toLowerCase());
+
+    // find each column dynamically
+    const idIdx = cols.findIndex(c => c.includes('item id'));
+    const nameIdx = cols.findIndex(c => c.includes('ingredient'));
+    const costIdx = cols.findIndex(c => c.includes('cost'));
+    const qtyIdx = cols.findIndex(c => c.includes('quantity'));
+    const locIdx = cols.findIndex(c => c.includes('location'));
+
+    // if any are missing, bail
+    if ([idIdx, nameIdx, costIdx, qtyIdx, locIdx].some(i => i < 0)) {
+      console.warn('CSV not recognized as 5‑column Ingredient template');
+      return;
+    }
+
+    // parse & insert each data row
+    for (const line of lines) {
+      const cells = line.split(/\t|,/).map(c => c.trim());
+      if (cells.length < cols.length) continue; // skip incomplete
+
+      const itemId   = cells[idIdx];
+      const name     = cells[nameIdx];
+      const cost     = parseFloat(cells[costIdx]);
+      const quantity = parseFloat(cells[qtyIdx]);
+      const location = cells[locIdx];
+
+      await fetch('/api/inventory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          itemId,
+          type: 'Ingredient' as const,
+          name,
+          cost,
+          location,
+          quantity,
+        }),
+      });
+    }
+
+    window.location.reload();
+    // await loadInventory();
   }
 
-  // --- aggregate & filter by date range ---
+  // --- aggregate & filter by startDate/endDate ---
   const aggregatedItems = useMemo(() => {
     let filtered = items;
-    if (dateRange.from) {
-      filtered = filtered.filter(i => new Date(i.updatedAt) >= dateRange.from!);
+    if (startDate) {
+      filtered = filtered.filter(i => new Date(i.updatedAt) >= startDate);
     }
-    if (dateRange.to) {
-      filtered = filtered.filter(i => new Date(i.updatedAt) <= dateRange.to!);
+    if (endDate) {
+      const inclusiveEnd = endOfDay(endDate);
+      filtered = filtered.filter(i => new Date(i.updatedAt) <= inclusiveEnd);
     }
 
     const map = new Map<string, InventoryItem[]>();
@@ -256,7 +335,7 @@ export default function InventoryPage() {
         cost: latest.cost,
       };
     });
-  }, [items, dateRange]);
+  }, [items, startDate, endDate]);
 
   // --- table columns ---
   const columns = useMemo<ColumnDef<InventoryItem>[]>(() => [
@@ -370,9 +449,7 @@ export default function InventoryPage() {
           hour: '2-digit',
           minute: '2-digit',
         }).replace(',', ' @'),
-
-        meta: { hideBelowLg: true },
-
+      meta: { hideBelowLg: true },
     },
     {
       id: 'actions',
@@ -387,6 +464,11 @@ export default function InventoryPage() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => {
+                setSelectedItem(item);
+                setChangeNameText(item.name);
+                setChangeNameDialogOpen(true);
+              }}>Change Name</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => {
                 setSelectedItem(item);
                 setModalMode('update');
@@ -414,7 +496,7 @@ export default function InventoryPage() {
                     setNoteDialogOpen(true);
                   }}>Add Note</DropdownMenuItem>
               }
-              <DropdownMenuItem variant='destructive' onSelect={() => {
+              <DropdownMenuItem variant="destructive" onSelect={() => {
                 setSelectedItem(item);
                 setDeleteDialogOpen(true);
               }}>Remove Item</DropdownMenuItem>
@@ -425,6 +507,7 @@ export default function InventoryPage() {
     },
   ], []);
 
+  // build the table
   const table = useReactTable({
     data: aggregatedItems,
     columns,
@@ -448,35 +531,56 @@ export default function InventoryPage() {
         }}
       />
 
-      {/* Search + Date range */}
-      <div className="md:flex space-x-2 lg:space-x-4 mb-4 w-full justify-center md:justify-evenly">
+      {/* Search + Date filters */}
+      <div className="lg:flex space-x-2 lg:space-x-4 mb-4 w-full justify-center lg:justify-evenly">
         <InventorySearch
           value={globalFilter}
           onChange={setGlobalFilter}
         />
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button variant="outline" className="md:w-60 w-[80%] ml-[10%] md:ml-0 justify-start text-left">
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {dateRange?.from && dateRange.to
-                ? `${format(dateRange.from, 'MMM dd, yyyy')} - ${format(dateRange.to, 'MMM dd, yyyy')}`
-                : dateRange?.from
-                ? `From ${format(dateRange.from, 'MMM dd, yyyy')}`
-                : dateRange?.to
-                ? `To ${format(dateRange.to, 'MMM dd, yyyy')}`
-                : 'Select date range'}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0" align="start">
-            <Calendar
-              mode="range"
-              selected={dateRange}
-              onSelect={range => setDateRange(range ?? { from: undefined, to: undefined })}
-              captionLayout="dropdown"
-              initialFocus
-            />
-          </PopoverContent>
-        </Popover>
+
+        <div className='lg:flex space-y-4 lg:space-x-4 mt-2 lg:mt-0 w-full justify-center'>
+          {/* Start Date Picker */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" className="lg:w-60 w-[80%] ml-[10%] lg:ml-0 justify-start text-left">
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {startDate
+                  ? `Start: ${format(startDate, 'MMM dd, yyyy')}`
+                  : 'Start date'}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={startDate}
+                onSelect={date => setStartDate(date || undefined)}
+                captionLayout="dropdown"
+                initialFocus
+              />
+            </PopoverContent>
+          </Popover>
+
+          {/* End Date Picker */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" className="lg:w-60 w-[80%] ml-[10%] lg:ml-0 justify-start text-left">
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {endDate
+                  ? `End: ${format(endDate, 'MMM dd, yyyy')}`
+                  : 'End date'}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={endDate}
+                onSelect={date => setEndDate(date || undefined)}
+                captionLayout="dropdown"
+                initialFocus
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
       </div>
 
       <InventoryTable
@@ -510,6 +614,33 @@ export default function InventoryPage() {
         onChangeNote={setNoteText}
         onSubmitNote={handleNoteSubmit}
       />
+
+      {/* Change Name Dialog */}
+      <Dialog open={changeNameDialogOpen} onOpenChange={open => !open && setChangeNameDialogOpen(false)}>  
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Change Name</DialogTitle>
+          </DialogHeader>
+          <form
+            onSubmit={e => {
+              e.preventDefault();
+              handleChangeNameSubmit();
+            }}
+            className="space-y-4"
+          >
+            <div>
+              <Label>New Name</Label>
+              <Input
+                value={changeNameText}
+                onChange={e => setChangeNameText(e.target.value)}
+              />
+            </div>
+            <DialogFooter>
+              <Button type="submit">Save</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Adjust Cost Dialog */}
       <Dialog open={costDialogOpen} onOpenChange={open => !open && setCostDialogOpen(false)}>
