@@ -2,6 +2,7 @@ export type ItemType = 'Ingredient' | 'Supply';
 
 export interface InventoryItem {
   id: string;
+  itemId: string;
   name: string;
   cost: string;
   location: string;

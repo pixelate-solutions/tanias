@@ -1,68 +1,28 @@
-// app/api/inventory/[id]/route.ts
-
-import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
-import { ingredients, supplies } from '@/drizzle/schema'
-import { eq, sql } from 'drizzle-orm'
+import { NextResponse } from 'next/server';
+import { db } from '@/lib/db';
+import { ingredients, supplies } from '@/drizzle/schema';
+import { eq } from 'drizzle-orm';
+import { randomUUID } from 'crypto';
 
 interface PatchBody {
-  delta?: number
-  note?: string
+  delta?: number;
+  cost?: number;
+  note?: string;
 }
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params
-  const body = (await request.json()) as PatchBody
+  const { id } = await params;
+  const body = (await request.json()) as PatchBody;
 
-  // 1) Adjust quantity if delta provided
-  if (typeof body.delta === 'number') {
-    // ingredients
-    await db
-      .update(ingredients)
-      .set({
-        quantity: sql`${ingredients.quantity} + ${body.delta}`,
-        updatedAt: sql`NOW()`,         // ← bump timestamp
-      })
-      .where(eq(ingredients.id, id))
-
-    // supplies
-    await db
-      .update(supplies)
-      .set({
-        quantity: sql`${supplies.quantity} + ${body.delta}`,
-        updatedAt: sql`NOW()`,         // ← bump timestamp
-      })
-      .where(eq(supplies.id, id))
-  }
-
-  // 2) Update note if provided
-  if (typeof body.note === 'string') {
-    // ingredients
-    await db
-      .update(ingredients)
-      .set({
-        note: body.note,
-        updatedAt: sql`NOW()`,         // ← bump timestamp
-      })
-      .where(eq(ingredients.id, id))
-
-    // supplies
-    await db
-      .update(supplies)
-      .set({
-        note: body.note,
-        updatedAt: sql`NOW()`,         // ← bump timestamp
-      })
-      .where(eq(supplies.id, id))
-  }
-
-  // 3) Return the updated row
-  const [ing] = await db
+  // fetch original entry
+  let orig, table: typeof ingredients | typeof supplies, type: 'Ingredient' | 'Supply';
+  const ingRows = await db
     .select({
       id: ingredients.id,
+      itemId: ingredients.itemId,
       name: ingredients.name,
       cost: ingredients.cost,
       location: ingredients.location,
@@ -71,40 +31,72 @@ export async function PATCH(
       note: ingredients.note,
     })
     .from(ingredients)
-    .where(eq(ingredients.id, id))
+    .where(eq(ingredients.id, id));
 
-  if (ing) {
-    return NextResponse.json({ ...ing, type: 'Ingredient' as const })
+  if (ingRows.length) {
+    orig = ingRows[0];
+    table = ingredients;
+    type = 'Ingredient';
+  } else {
+    const supRows = await db
+      .select({
+        id: supplies.id,
+        itemId: supplies.itemId,
+        name: supplies.name,
+        cost: supplies.cost,
+        location: supplies.location,
+        quantity: supplies.quantity,
+        updatedAt: supplies.updatedAt,
+        note: supplies.note,
+      })
+      .from(supplies)
+      .where(eq(supplies.id, id));
+
+    if (!supRows.length) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    orig = supRows[0];
+    table = supplies;
+    type = 'Supply';
   }
 
-  const [sup] = await db
-    .select({
-      id: supplies.id,
-      name: supplies.name,
-      cost: supplies.cost,
-      location: supplies.location,
-      quantity: supplies.quantity,
-      updatedAt: supplies.updatedAt,
-      note: supplies.note,
-    })
-    .from(supplies)
-    .where(eq(supplies.id, id))
-
-  if (sup) {
-    return NextResponse.json({ ...sup, type: 'Supply' as const })
+  // note‑only: update in place
+  if (typeof body.note === 'string') {
+    await db.update(table).set({ note: body.note }).where(eq(table.id, id));
+    const [updated] = await db.select().from(table).where(eq(table.id, id));
+    return NextResponse.json({ ...updated, type });
   }
 
-  return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  // else: create a new row copying everything, modifying delta or cost
+  const newId = randomUUID();
+  const insertVals = {
+    id: newId,
+    itemId: orig.itemId,
+    name: orig.name,
+    cost:
+      typeof body.cost === 'number'
+        ? body.cost.toString()
+        : orig.cost,
+    location: orig.location,
+    quantity:
+      typeof body.delta === 'number'
+        ? body.delta.toString()
+        : orig.quantity,
+
+    note: orig.note,
+  };
+
+  await db.insert(table).values(insertVals);
+  const [inserted] = await db.select().from(table).where(eq(table.id, newId));
+  return NextResponse.json({ ...inserted, type });
 }
 
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params
-
-  await db.delete(ingredients).where(eq(ingredients.id, id))
-  await db.delete(supplies).where(eq(supplies.id, id))
-
-  return NextResponse.json({ success: true })
+  const { id } = await params;
+  await db.delete(ingredients).where(eq(ingredients.id, id));
+  await db.delete(supplies).where(eq(supplies.id, id));
+  return NextResponse.json({ success: true });
 }

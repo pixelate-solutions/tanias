@@ -120,3 +120,13 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* your globals.css (or tailwind.config.css) */
+.rdp-caption_label {
+  @apply font-sans text-base;    /* or whatever Tailwind font class you like */
+}
+
+/* if you really want to target the invisible <select> itself */
+.rdp-dropdown_root select {
+  font-family: 'Inter', sans-serif;
+}

@@ -9,12 +9,12 @@ interface SearchProps {
 
 export default function InventorySearch({ value, onChange }: SearchProps) {
   return (
-    <div className="mb-4">
+    <div className="w-[full] md:w-auto mb-4">
       <Input
         placeholder="Search inventory…"
         value={value}
         onChange={e => onChange(e.target.value)}
-        className="max-w-sm"
+        className="md:w-80 w-[80%] ml-[10%]"
       />
     </div>
   );

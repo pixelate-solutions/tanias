@@ -2,17 +2,21 @@
 
 import React from 'react';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { ItemType, InventoryItem } from './types';
+import { InventoryItem } from './types';
 
 interface ModalsProps {
-  // create/update
+  // create vs adjust‐quantity
   modalOpen: boolean;
   modalMode: 'create' | 'update';
   newItem: Partial<InventoryItem>;
@@ -20,7 +24,7 @@ interface ModalsProps {
   delta: string;
   updateError: string;
   onCloseModal: () => void;
-  onChangeNew: (k: string, v: string) => void;
+  onChangeNew: (key: string, value: string) => void;
   onSubmitCreate: () => void;
   onSubmitUpdate: () => void;
 
@@ -30,7 +34,7 @@ interface ModalsProps {
   onCloseDelete: () => void;
   onSubmitDelete: () => void;
 
-  // note
+  // notes
   noteDialogOpen: boolean;
   noteMode: 'add' | 'edit';
   noteText: string;
@@ -41,16 +45,34 @@ interface ModalsProps {
 
 export default function InventoryModals(props: ModalsProps) {
   const {
-    modalOpen, modalMode, newItem, createErrors, delta, updateError,
-    onCloseModal, onChangeNew, onSubmitCreate, onSubmitUpdate,
-    deleteDialogOpen, selectedItem, onCloseDelete, onSubmitDelete,
-    noteDialogOpen, noteMode, noteText, onCloseNote, onChangeNote, onSubmitNote
+    modalOpen,
+    modalMode,
+    newItem,
+    createErrors,
+    delta,
+    updateError,
+    onCloseModal,
+    onChangeNew,
+    onSubmitCreate,
+    onSubmitUpdate,
+
+    deleteDialogOpen,
+    selectedItem,
+    onCloseDelete,
+    onSubmitDelete,
+
+    noteDialogOpen,
+    noteMode,
+    noteText,
+    onCloseNote,
+    onChangeNote,
+    onSubmitNote,
   } = props;
 
   return (
     <>
-      {/* Create / Adjust */}
-      <Dialog open={modalOpen} onOpenChange={o => !o && onCloseModal()}>
+      {/* Create or Adjust Quantity */}
+      <Dialog open={modalOpen} onOpenChange={open => !open && onCloseModal()}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>
@@ -59,64 +81,91 @@ export default function InventoryModals(props: ModalsProps) {
                 : `Adjust “${selectedItem?.name}”`}
             </DialogTitle>
           </DialogHeader>
+
           {modalMode === 'create' ? (
-            <form onSubmit={e => { e.preventDefault(); onSubmitCreate(); }} className="space-y-4">
-              {/* ID */}
+            <form
+              onSubmit={e => {
+                e.preventDefault();
+                onSubmitCreate();
+              }}
+              className="space-y-4"
+            >
+              {/* Item ID */}
               <div>
-                <Label className="mb-1 ml-2">ID <span className="text-gray-400">(optional)</span></Label>
+                <Label>Item ID</Label>
                 <Input
-                  placeholder="Leave blank for auto-generated"
-                  value={newItem.id || ''}
-                  onChange={e => onChangeNew('id', e.target.value)}
+                  placeholder="e.g. 101054"
+                  value={newItem.itemId || ''}
+                  onChange={e => onChangeNew('itemId', e.target.value)}
                 />
+                {createErrors.itemId && (
+                  <p className="text-red-500 text-sm">{createErrors.itemId}</p>
+                )}
               </div>
+
               {/* Type */}
               <div>
-                <Label className="mb-1 ml-2">Type</Label>
+                <Label>Type</Label>
                 <Select
                   value={newItem.type || 'Ingredient'}
                   onValueChange={val => onChangeNew('type', val)}
                 >
-                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="Ingredient">Ingredient</SelectItem>
                     <SelectItem value="Supply">Supply</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              {/* Name / Cost / Location / Quantity inputs… */}
+
+              {/* Name, Cost, Location, Quantity */}
               {[
-                ['name','Name','text'],
-                ['cost','Cost','number'],
-                ['location','Location','text'],
-                ['quantity','Initial Quantity','number'],
-              ].map(([key,label,type]) => (
+                ['name', 'Name', 'text'],
+                ['cost', 'Cost', 'number'],
+                ['location', 'Location', 'text'],
+                ['quantity', 'Quantity', 'number'],
+              ].map(([key, label, type]) => (
                 <div key={key}>
-                  <Label className="mb-1 ml-2">{label}</Label>
+                  <Label>{label}</Label>
                   <Input
-                    type={type}
-                    step={type==='number' ? '0.01' : undefined}
+                    type={type as 'text' | 'number'}
+                    step={type === 'number' ? '0.01' : undefined}
                     value={(newItem as any)[key] || ''}
                     onChange={e => onChangeNew(key, e.target.value)}
                   />
-                  {createErrors[key] && <p className="text-red-500 text-sm mt-1">{createErrors[key]}</p>}
+                  {(createErrors as any)[key] && (
+                    <p className="text-red-500 text-sm">{(createErrors as any)[key]}</p>
+                  )}
                 </div>
               ))}
+
               <DialogFooter>
-                <Button type="submit" className="w-[60%] mx-auto mt-5">Create</Button>
+                <Button type="submit" className="w-full">
+                  Create
+                </Button>
               </DialogFooter>
             </form>
           ) : (
-            <form onSubmit={e => { e.preventDefault(); onSubmitUpdate(); }} className="space-y-4">
+            <form
+              onSubmit={e => {
+                e.preventDefault();
+                onSubmitUpdate();
+              }}
+              className="space-y-4"
+            >
               <div>
-                <Label className="mb-1 ml-2">Quantity (±)</Label>
+                <Label>Add/Subtract Quantity (±)</Label>
                 <Input
                   type="number"
                   step="0.01"
                   value={delta}
                   onChange={e => onChangeNew('delta', e.target.value)}
                 />
-                {updateError && <p className="text-red-500 text-sm mt-1">{updateError}</p>}
+                {updateError && (
+                  <p className="text-red-500 text-sm">{updateError}</p>
+                )}
               </div>
               <DialogFooter>
                 <Button type="submit">Submit</Button>
@@ -126,38 +175,70 @@ export default function InventoryModals(props: ModalsProps) {
         </DialogContent>
       </Dialog>
 
-      {/* Delete */}
-      <Dialog open={deleteDialogOpen} onOpenChange={o => !o && onCloseDelete()}>
+      {/* Delete Confirmation */}
+      <Dialog
+        open={deleteDialogOpen}
+        onOpenChange={open => !open && onCloseDelete()}
+      >
         <DialogContent className="max-w-xs">
           <DialogHeader>
             <DialogTitle>Confirm Deletion</DialogTitle>
           </DialogHeader>
-          <form onSubmit={e => { e.preventDefault(); onSubmitDelete(); }}>
-            <p className="p-4">Are you sure you want to delete “{selectedItem?.name}”?</p>
-            <DialogFooter className="md:space-x-2">
-              <Button type="submit" variant="destructive">Delete</Button>
-              <Button type="button" variant="ghost" onClick={onCloseDelete}>Cancel</Button>
+          <form
+            onSubmit={e => {
+              e.preventDefault();
+              onSubmitDelete();
+            }}
+          >
+            <p className="p-4">
+              Are you sure you want to delete “{selectedItem?.name}”?
+            </p>
+            <DialogFooter className="space-x-2">
+              <Button type="button" className='border' variant="ghost" onClick={onCloseDelete}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="destructive">
+                Delete
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
 
-      {/* Note */}
-      <Dialog open={noteDialogOpen} onOpenChange={o => !o && onCloseNote()}>
+      {/* Add/Edit Note */}
+      <Dialog
+        open={noteDialogOpen}
+        onOpenChange={open => !open && onCloseNote()}
+      >
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              {noteMode === 'add' ? 'Add Note' : 'Edit Note'} for “{selectedItem?.name}”
+              {noteMode === 'add' ? 'Add Note' : 'Edit Note'} for “
+              {selectedItem?.name}”
             </DialogTitle>
           </DialogHeader>
-          <form onSubmit={e => { e.preventDefault(); onSubmitNote(); }} className="space-y-4">
+          <form
+            onSubmit={e => {
+              e.preventDefault();
+              onSubmitNote();
+            }}
+            className="space-y-4"
+          >
             <div>
-              <Label className="mb-1 ml-2">Note</Label>
-              <Textarea rows={6} value={noteText} onChange={e => onChangeNote(e.target.value)} className="w-full"/>
+              <Label>Note</Label>
+              <Textarea
+                rows={4}
+                value={noteText}
+                onChange={e => onChangeNote(e.target.value)}
+              />
             </div>
             <DialogFooter className="space-x-2">
-              <Button type="button" variant="ghost" onClick={onCloseNote}>Cancel</Button>
-              <Button type="submit">{noteMode==='add' ? 'Add Note' : 'Save Changes'}</Button>
+              <Button variant="ghost" onClick={onCloseNote}>
+                Cancel
+              </Button>
+              <Button type="submit">
+                {noteMode === 'add' ? 'Add Note' : 'Save Changes'}
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>

@@ -1,12 +1,11 @@
-// app/api/inventory/route.ts
-
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { ingredients, supplies } from '@/drizzle/schema';
 import { randomUUID } from 'crypto';
+import { eq } from 'drizzle-orm';
 
 interface CreateBody {
-  id?: string;
+  itemId: string;
   type: 'Ingredient' | 'Supply';
   name: string;
   cost: number;
@@ -18,6 +17,7 @@ export async function GET() {
   const ing = await db
     .select({
       id: ingredients.id,
+      itemId: ingredients.itemId,
       name: ingredients.name,
       cost: ingredients.cost,
       location: ingredients.location,
@@ -30,6 +30,7 @@ export async function GET() {
   const sup = await db
     .select({
       id: supplies.id,
+      itemId: supplies.itemId,
       name: supplies.name,
       cost: supplies.cost,
       location: supplies.location,
@@ -39,58 +40,55 @@ export async function GET() {
     })
     .from(supplies);
 
-  const items = [
+  return NextResponse.json([
     ...ing.map(i => ({ ...i, type: 'Ingredient' as const })),
     ...sup.map(s => ({ ...s, type: 'Supply' as const })),
-  ];
-
-  return NextResponse.json(items);
+  ]);
 }
 
 export async function POST(request: Request) {
   const body = (await request.json()) as CreateBody;
 
-  // Validate required
   if (
-    !body.type ||
-    !body.name ||
+    !body.itemId.trim() ||
+    !body.name.trim() ||
     body.cost == null ||
-    !body.location ||
+    !body.location.trim() ||
     body.quantity == null
   ) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
   }
 
-  // Use provided id or fallback to randomUUID
-  const id = body.id?.trim() || randomUUID();
+  const id = randomUUID();
+  const common = {
+    id,
+    itemId: body.itemId,
+    name: body.name,
+    cost: body.cost.toString(),
+    location: body.location,
+    quantity: body.quantity.toString(),
+  };
 
-  let inserted: any;
-
+  let inserted;
   if (body.type === 'Ingredient') {
-    const result = await db
-      .insert(ingredients)
-      .values({
-        id,
-        name: body.name,
-        cost: body.cost.toString(),
-        location: body.location,
-        quantity: body.quantity.toString(),
-      })
-      .returning();
-    inserted = result[0];
+    [inserted] = await db.insert(ingredients).values(common).returning();
   } else {
-    const result = await db
-      .insert(supplies)
-      .values({
-        id,
-        name: body.name,
-        cost: body.cost.toString(),
-        location: body.location,
-        quantity: body.quantity.toString(),
-      })
-      .returning();
-    inserted = result[0];
+    [inserted] = await db.insert(supplies).values(common).returning();
   }
 
   return NextResponse.json({ ...inserted, type: body.type });
+}
+
+export async function DELETE(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const itemId = searchParams.get('itemId');
+  if (!itemId) {
+    return NextResponse.json({ error: 'Missing itemId' }, { status: 400 });
+  }
+
+  // delete every row sharing that itemId
+  await db.delete(ingredients).where(eq(ingredients.itemId, itemId));
+  await db.delete(supplies).where(eq(supplies.itemId, itemId));
+
+  return NextResponse.json({ success: true });
 }
